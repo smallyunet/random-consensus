@@ -2,11 +2,24 @@
 <html>
   <head>
     <meta charset="UTF-8" />
-    <title>Consensus Visualization</title>
-    <!-- Include a D3.js script. Version 6 or above is fine. -->
+    <title>Random Consensus Animation</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/6.7.0/d3.min.js"></script>
     <style>
-      body { font-family: sans-serif; }
+      body {
+        font-family: sans-serif;
+        margin: 0;
+        padding: 0;
+      }
+      h1, p {
+        text-align: center;
+      }
+
+      #consensusViz {
+        border: 1px solid #ccc;
+        display: block;
+        margin: 20px auto;
+      }
+
       .node {
         stroke: #333;
         stroke-width: 1px;
@@ -15,29 +28,46 @@
         text-anchor: middle;
         alignment-baseline: middle;
         fill: #fff;
+        font-size: 11px;
+      }
+      /* Tooltip styling */
+      .tooltip {
+        position: absolute;
+        pointer-events: none; /* don't block mouse interactions */
+        background: rgba(0,0,0,0.7);
+        color: #fff;
+        padding: 6px 8px;
+        border-radius: 4px;
         font-size: 12px;
+        visibility: hidden; /* hidden by default */
       }
     </style>
   </head>
 
   <body>
     <h1>Random Consensus Animation</h1>
+    <p>This demo shows node ID, height, and block hash for each round. Hover over circles for extra details.</p>
+
+    <!-- Tooltip div for mouseover info -->
+    <div id="tooltip" class="tooltip"></div>
+
     <svg id="consensusViz" width="800" height="600"></svg>
 
     <script>
-      // We'll load the consensus_data.json, then animate round by round.
+      // 1) Load consensus_data.json
       d3.json("consensus_data.json").then(function(data) {
-        // Data format: an array of objects:
-        // { node_id: 0, height: 1, hash: "abc123", round: 0 }, ...
+        // data: an array of objects {node_id, height, hash, round}
 
-        // Figure out how many rounds we have
-        const rounds = d3.extent(data, d => d.round);
-        const maxRound = rounds[1];
+        // Figure out min/max rounds
+        const [minRound, maxRound] = d3.extent(data, d => d.round);
 
-        // Group data by round for easier display
-        const roundData = d3.groups(data, d => d.round); 
-        // roundData is an array of [roundNumber, dataForThatRound]
+        // Group by round => [ [roundValue, [ {node_id, height, hash, round}, ... ] ], ... ]
+        const roundData = d3.groups(data, d => d.round);
 
+        // Find overall max height across ALL rounds to keep the scale consistent
+        const globalMaxHeight = d3.max(data, d => d.height) || 1;
+
+        // Basic SVG setup
         const svg = d3.select("#consensusViz");
         const width = +svg.attr("width");
         const height = +svg.attr("height");
@@ -45,71 +75,98 @@
         const nodeSpacing = 100;
         const nodeRadius = 20;
 
-        // We'll create a group to hold all node circles
+        // Color scale to differentiate nodes by ID
+        const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
+
+        // Single global y-scale
+        const yScale = d3.scaleLinear()
+          .domain([0, globalMaxHeight])
+          .range([height - nodeRadius*2, nodeRadius*2]);
+
+        // A group to hold all nodes
         const gNodes = svg.append("g").attr("class", "all-nodes");
 
-        // A function that draws a given round's state
+        // Label for showing the current round
+        const roundLabel = svg.append("text")
+          .attr("x", 20)
+          .attr("y", 40)
+          .attr("font-size", 20)
+          .attr("fill", "#333")
+          .text("Round 0");
+
+        // A tooltip for mouseover
+        const tooltip = d3.select("#tooltip");
+
+        // Function to render a specific round
         function drawRound(roundIndex) {
-          // Find the data for this round
-          const thisRoundEntry = roundData.find(([r, arr]) => r === roundIndex);
-          if(!thisRoundEntry) return;
-          const nodeInfo = thisRoundEntry[1]; // array of {node_id, height, hash, round}
+          // Grab the data for this round
+          const entry = roundData.find(([r]) => r === roundIndex);
+          if(!entry) return; // no data for that round
+          const nodeInfo = entry[1]; // array of {node_id, height, hash, round}
 
-          // We'll scale heights so bigger "height" => higher Y offset
-          // but note in typical coordinate systems, higher "height" might be lower on the screen.
-          // We'll invert it so bigger chain height is visually higher.
-          const maxHeightValue = d3.max(nodeInfo, d => d.height);
-          const yScale = d3.scaleLinear()
-            .domain([0, maxHeightValue || 1])
-            .range([height - nodeRadius*2, nodeRadius*2]);
+          roundLabel.text("Round " + roundIndex);
 
-          // Data join
-          const sel = gNodes
-            .selectAll(".node-group")
+          // Data-join
+          const sel = gNodes.selectAll(".node-group")
             .data(nodeInfo, d => d.node_id);
 
           // Enter
-          const enterSel = sel.enter()
-            .append("g")
+          const enterSel = sel.enter().append("g")
             .attr("class", "node-group")
-            .attr("transform", (d) => {
-              // position horizontally by node_id, vertically by height
+            .attr("transform", d => {
               const x = (d.node_id + 1) * nodeSpacing;
               const y = yScale(d.height);
-              return `translate(${x},${y})`;
+              return `translate(${x}, ${y})`;
+            })
+            // Mouse events for tooltip
+            .on("mouseover", function(event, d) {
+              const [mx, my] = d3.pointer(event, document.body);
+              tooltip.style("left", (mx + 10) + "px")
+                .style("top", my + "px")
+                .style("visibility", "visible")
+                // Show more detail: node ID, height, the full hash
+                .text(`Node ${d.node_id}\nHeight=${d.height}\nHash=${d.hash}`);
+            })
+            .on("mousemove", function(event) {
+              const [mx, my] = d3.pointer(event, document.body);
+              tooltip.style("left", (mx + 10) + "px")
+                .style("top", my + "px");
+            })
+            .on("mouseout", function() {
+              tooltip.style("visibility", "hidden");
             });
-          
+
           enterSel.append("circle")
             .attr("class", "node")
             .attr("r", nodeRadius)
-            .attr("fill", "steelblue");
-          
+            .attr("fill", d => colorScale(d.node_id));
+
+          // Show ID and short-hash, or something like that, inside the circle
+          // We'll just do the first 5 characters of the hash for brevity
           enterSel.append("text")
             .attr("class", "label")
-            .text(d => d.hash);
+            .attr("dy", 4)
+            .text(d => `N${d.node_id}(H=${d.height})`);
 
-          // Update
-          const updateSel = sel
-            .transition()
-            .duration(700)
-            .attr("transform", (d) => {
+          // Update selection: transition position
+          sel.transition()
+            .duration(1000)  // 1 second transition
+            .attr("transform", d => {
               const x = (d.node_id + 1) * nodeSpacing;
               const y = yScale(d.height);
-              return `translate(${x},${y})`;
-            });
+              return `translate(${x}, ${y})`;
+            })
+            .select(".label")
+            .text(d => `N${d.node_id}(H=${d.height})`);
 
-          updateSel.select(".label")
-            .text(d => d.hash);
-
-          // Exit (not typically needed here, but in case the number of nodes changes)
+          // Exit
           sel.exit().remove();
         }
 
-        // We'll iterate over all rounds with a timer, so it animates
-        let currentRound = rounds[0];
+        // Animate from minRound to maxRound
+        let currentRound = minRound;
         drawRound(currentRound);
 
-        // Animate every 2 seconds
         const timer = d3.interval(() => {
           currentRound++;
           if(currentRound > maxRound) {
@@ -117,7 +174,10 @@
             return;
           }
           drawRound(currentRound);
-        }, 2000);
+        }, 2000); // every 2 seconds; feel free to change to 1500 or 1000
+
+      }).catch(err => {
+        console.error("Error loading JSON data:", err);
       });
     </script>
   </body>

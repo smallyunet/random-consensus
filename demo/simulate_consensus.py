@@ -85,7 +85,7 @@ def random_consensus_round(nodes):
 
 def main():
     NODES = 5
-    ROUNDS = 5
+    ROUNDS = 10
     nodes = [Node(i) for i in range(NODES)]
 
     all_rounds_data = []  # will store states for each round
