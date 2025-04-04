@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Consensus Visualization</title>
+    <!-- Include a D3.js script. Version 6 or above is fine. -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/6.7.0/d3.min.js"></script>
+    <style>
+      body { font-family: sans-serif; }
+      .node {
+        stroke: #333;
+        stroke-width: 1px;
+      }
+      .label {
+        text-anchor: middle;
+        alignment-baseline: middle;
+        fill: #fff;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h1>Random Consensus Animation</h1>
+    <svg id="consensusViz" width="800" height="600"></svg>
+
+    <script>
+      // We'll load the consensus_data.json, then animate round by round.
+      d3.json("consensus_data.json").then(function(data) {
+        // Data format: an array of objects:
+        // { node_id: 0, height: 1, hash: "abc123", round: 0 }, ...
+
+        // Figure out how many rounds we have
+        const rounds = d3.extent(data, d => d.round);
+        const maxRound = rounds[1];
+
+        // Group data by round for easier display
+        const roundData = d3.groups(data, d => d.round); 
+        // roundData is an array of [roundNumber, dataForThatRound]
+
+        const svg = d3.select("#consensusViz");
+        const width = +svg.attr("width");
+        const height = +svg.attr("height");
+
+        const nodeSpacing = 100;
+        const nodeRadius = 20;
+
+        // We'll create a group to hold all node circles
+        const gNodes = svg.append("g").attr("class", "all-nodes");
+
+        // A function that draws a given round's state
+        function drawRound(roundIndex) {
+          // Find the data for this round
+          const thisRoundEntry = roundData.find(([r, arr]) => r === roundIndex);
+          if(!thisRoundEntry) return;
+          const nodeInfo = thisRoundEntry[1]; // array of {node_id, height, hash, round}
+
+          // We'll scale heights so bigger "height" => higher Y offset
+          // but note in typical coordinate systems, higher "height" might be lower on the screen.
+          // We'll invert it so bigger chain height is visually higher.
+          const maxHeightValue = d3.max(nodeInfo, d => d.height);
+          const yScale = d3.scaleLinear()
+            .domain([0, maxHeightValue || 1])
+            .range([height - nodeRadius*2, nodeRadius*2]);
+
+          // Data join
+          const sel = gNodes
+            .selectAll(".node-group")
+            .data(nodeInfo, d => d.node_id);
+
+          // Enter
+          const enterSel = sel.enter()
+            .append("g")
+            .attr("class", "node-group")
+            .attr("transform", (d) => {
+              // position horizontally by node_id, vertically by height
+              const x = (d.node_id + 1) * nodeSpacing;
+              const y = yScale(d.height);
+              return `translate(${x},${y})`;
+            });
+          
+          enterSel.append("circle")
+            .attr("class", "node")
+            .attr("r", nodeRadius)
+            .attr("fill", "steelblue");
+          
+          enterSel.append("text")
+            .attr("class", "label")
+            .text(d => d.hash);
+
+          // Update
+          const updateSel = sel
+            .transition()
+            .duration(700)
+            .attr("transform", (d) => {
+              const x = (d.node_id + 1) * nodeSpacing;
+              const y = yScale(d.height);
+              return `translate(${x},${y})`;
+            });
+
+          updateSel.select(".label")
+            .text(d => d.hash);
+
+          // Exit (not typically needed here, but in case the number of nodes changes)
+          sel.exit().remove();
+        }
+
+        // We'll iterate over all rounds with a timer, so it animates
+        let currentRound = rounds[0];
+        drawRound(currentRound);
+
+        // Animate every 2 seconds
+        const timer = d3.interval(() => {
+          currentRound++;
+          if(currentRound > maxRound) {
+            timer.stop();
+            return;
+          }
+          drawRound(currentRound);
+        }, 2000);
+      });
+    </script>
+  </body>
+</html>
